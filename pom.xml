@@ -1,11 +1,15 @@
 <project>
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.johnymuffin.jban</groupId>
+    <groupId>com.legacyminecraft.bans</groupId>
     <artifactId>lmbd-parent</artifactId>
     <name>LMBD</name>
     <version>1.2.0-SNAPSHOT</version>
     <packaging>pom</packaging>
+
+    <properties>
+        <maven.deploy.skip>true</maven.deploy.skip>
+    </properties>
 
     <modules>
         <module>./core</module>

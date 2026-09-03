@@ -1,0 +1,61 @@
+name: JBans
+author: JohnyMuffin
+version: 1.2.1
+main: com.johnymuffin.jban.beta.JohnyBans
+depend: [RetroBridge]
+commands:
+  jban:
+    description: ban a player
+    usage: /jban (playername) (reason) (duration)
+  junban:
+    description: unban a player
+    usage: /junban (playername)
+  jmute:
+    description: mute a player
+    usage: /jmute (playername) (reason) [minutes]
+  junmute:
+    description: unmute a player
+    usage: /junmute (playername)
+  jwarn:
+    description: warn a player
+    usage: /jwarn (playername) (reason)
+  warnack:
+    description: acknowledge active warnings
+    usage: /warnack
+  jbcode:
+    description: Get an LMBD authentication code
+    usage: /jbcode
+  jlookup:
+    description: Look up LMBD account associations and history
+    usage: /jlookup (player|alts|ips|ip|history) (username|uuid|ip) [all]
+  mbexceptions:
+    description: ban a player
+    usage: /mbexceptions (add/remove/list)
+permissions:
+  johnybans.ban:
+    description: Allows staff to ban players with LMBD
+    default: op
+  johnybans.unban:
+    description: Allows staff to unban players with LMBD
+    default: op
+  johnybans.mute:
+    description: Allows staff to mute players with LMBD
+    default: op
+  johnybans.unmute:
+    description: Allows staff to unmute players with LMBD
+    default: op
+  johnybans.warn:
+    description: Allows staff to warn players with LMBD
+    default: op
+  johnybans.jbcode:
+    description: Allows staff to request an LMBD authentication code
+    default: op
+  johnybans.exceptions:
+    description: Allows staff to manage LMBD exception entries
+    default: op
+  johnybans.lookup:
+    description: Allows staff to use non-IP LMBD lookup commands
+    default: op
+  johnybans.lookup.ip:
+    description: Allows staff to view IP history and cross-server association data
+    default: op

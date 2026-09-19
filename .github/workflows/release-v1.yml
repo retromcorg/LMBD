@@ -112,10 +112,11 @@ jobs:
           tag_name: v1-${{ steps.version.outputs.plugin }}
           name: Poseidon V1 ${{ steps.version.outputs.plugin }}
           fail_on_unmatched_files: true
+          # Anchored on the artifactId: this cannot match shade's original-*.jar backup.
+          # Do not use '!' negation here, this action does not support it.
           files: |
-            core/target/*.jar
-            poseidon/target/*.jar
-            !**/original-*.jar
+            core/target/core-*.jar
+            poseidon/target/lmbd-poseidon-*.jar
 
       - name: Summary
         run: |

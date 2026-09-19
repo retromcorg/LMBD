@@ -1,0 +1,133 @@
+name: Release V2 (Poseidon V2)
+
+# Publishes the Java 25 line: com.legacyminecraft.bans:lmbd-poseidon-v2.
+# Manual only — release repositories reject a redeploy of an existing version, so this must
+# not fire automatically on every push. Bump the module version, then run this.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and verify only, do not publish"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-v2
+  cancel-in-progress: false
+
+env:
+  # poseidon-v2 compiles with release 25, so the JDK must be 25.
+  JAVA_VERSION: "25"
+  MAVEN_CLI_OPTS: "-B -ntp"
+
+jobs:
+  release:
+    name: Release V2
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # server-id must match the <id> in the module's <distributionManagement>, or
+      # `mvn deploy` skips the credentials and fails with a 401.
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+          server-id: johnymuffin-nexus
+          server-username: MAVEN_USERNAME
+          server-password: MAVEN_PASSWORD
+
+      - name: Read module versions
+        id: version
+        run: |
+          CORE=$(mvn $MAVEN_CLI_OPTS -q -pl core -DforceStdout help:evaluate -Dexpression=project.version | tail -n 1)
+          PLUGIN=$(mvn $MAVEN_CLI_OPTS -q -pl poseidon-v2 -DforceStdout help:evaluate -Dexpression=project.version | tail -n 1)
+          echo "core=$CORE" >> $GITHUB_OUTPUT
+          echo "plugin=$PLUGIN" >> $GITHUB_OUTPUT
+          echo "core $CORE / lmbd-poseidon-v2 $PLUGIN"
+
+      # -am pulls core into the reactor and installs it locally, so this works whether or not
+      # core has already been published.
+      - name: Build and test
+        run: mvn $MAVEN_CLI_OPTS -pl poseidon-v2 -am clean install
+
+      - name: Upload jars
+        uses: actions/upload-artifact@v4
+        with:
+          name: lmbd-v2-jars
+          if-no-files-found: error
+          path: |
+            poseidon-v2/target/*.jar
+            !**/original-*.jar
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports-v2
+          if-no-files-found: ignore
+          path: "**/target/surefire-reports/**"
+
+      # Same guard as the V1 workflow. The shade plugin keeps core as a compile dependency in the
+      # published pom (createDependencyReducedPom is false), so if core were bumped and only this
+      # workflow ran, the pom would point at a core version that is not in Nexus and consumers
+      # could not resolve it. Publish core here too when its version is missing; skip it when it
+      # is already there, because maven-releases rejects a redeploy.
+      - name: Decide deploy targets
+        id: targets
+        run: |
+          CORE_VERSION="${{ steps.version.outputs.core }}"
+          CORE_POM="https://repository.legacyminecraft.com/repository/maven-releases/com/legacyminecraft/bans/core/$CORE_VERSION/core-$CORE_VERSION.pom"
+          if [ "${CORE_VERSION%-SNAPSHOT}" != "$CORE_VERSION" ] || ! curl -sfI --max-time 30 "$CORE_POM" > /dev/null; then
+            echo "modules=core,poseidon-v2" >> $GITHUB_OUTPUT
+            echo "core $CORE_VERSION is not published yet; it will be deployed"
+          else
+            echo "modules=poseidon-v2" >> $GITHUB_OUTPUT
+            echo "core $CORE_VERSION is already in Nexus; deploying the plugin only"
+          fi
+
+      - name: Deploy to Nexus
+        if: ${{ !inputs.dry_run }}
+        run: mvn $MAVEN_CLI_OPTS -pl ${{ steps.targets.outputs.modules }} -DskipTests deploy
+        env:
+          MAVEN_USERNAME: ${{ secrets.NEXUS_USERNAME }}
+          MAVEN_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+
+      # Snapshots are not tagged; only a real version gets a GitHub release.
+      - name: Create GitHub Release
+        if: ${{ !inputs.dry_run && !endsWith(steps.version.outputs.plugin, '-SNAPSHOT') }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v2-${{ steps.version.outputs.plugin }}
+          name: Poseidon V2 ${{ steps.version.outputs.plugin }}
+          fail_on_unmatched_files: true
+          files: |
+            poseidon-v2/target/*.jar
+            !**/original-*.jar
+
+      - name: Summary
+        run: |
+          {
+            echo "### V2 release"
+            echo ""
+            echo "| Artifact | Version |"
+            echo "| --- | --- |"
+            echo "| lmbd-poseidon-v2 | ${{ steps.version.outputs.plugin }} |"
+            echo ""
+            echo "Deployed modules: \`${{ steps.targets.outputs.modules }}\` (core ${{ steps.version.outputs.core }})"
+            echo ""
+            if [ "${{ inputs.dry_run }}" = "true" ]; then
+              echo "Dry run: nothing was published."
+            else
+              echo "Published to Nexus."
+            fi
+          } >> $GITHUB_STEP_SUMMARY

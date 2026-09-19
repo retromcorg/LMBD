@@ -15,24 +15,22 @@ on:
 permissions:
   contents: read
 
-# Don't let two pushes to the same branch race; PR runs are disposable, but a
-# release or a Nexus deploy in flight is not.
+# This workflow only builds and verifies. Publishing lives in release-v1.yml and
+# release-v2.yml, which are manual so a release is never triggered by a push.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # Build JDK is decoupled from the target: the modules compile with source/target 8
-  # and the bytecode check below asserts the artifacts really are Java 8.
-  JAVA_VERSION: "21"
+  # Must be 25: poseidon-v2 compiles with release 25. core and poseidon still compile
+  # with release 8 on the same JDK, which keeps them running on Java 8 servers.
+  JAVA_VERSION: "25"
   MAVEN_CLI_OPTS: "-B -ntp"
 
 jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -54,34 +52,6 @@ jobs:
       - name: Build
         run: mvn $MAVEN_CLI_OPTS clean install
 
-      # source/target 8 on a JDK 25 javac is easy to lose silently, so assert the
-      # shipped artifacts really are Java 8 class files (major version 52).
-      - name: Verify Java 8 bytecode
-        run: |
-          python3 - <<'PY'
-          import glob, struct, sys, zipfile
-
-          jars = [j for j in glob.glob("core/target/*.jar") + glob.glob("poseidon/target/*.jar")
-                  if "original-" not in j]
-          if not jars:
-              sys.exit("No jars found to verify")
-
-          bad = []
-          for jar in jars:
-              with zipfile.ZipFile(jar) as z:
-                  for name in z.namelist():
-                      if not name.endswith(".class") or name.startswith("META-INF/versions/"):
-                          continue
-                      major = struct.unpack(">H", z.read(name)[6:8])[0]
-                      if major != 52:
-                          bad.append("%s!%s: major version %d" % (jar, name, major))
-              print("checked %s" % jar)
-
-          if bad:
-              sys.exit("Non-Java-8 bytecode found:\n" + "\n".join(bad[:20]))
-          print("All classes are Java 8 (major version 52)")
-          PY
-
       - name: Upload jars
         uses: actions/upload-artifact@v4
         with:
@@ -90,6 +60,7 @@ jobs:
           path: |
             core/target/*.jar
             poseidon/target/*.jar
+            poseidon-v2/target/*.jar
             !**/original-*.jar
 
       - name: Upload test reports
@@ -99,57 +70,3 @@ jobs:
           name: surefire-reports
           if-no-files-found: ignore
           path: "**/target/surefire-reports/**"
-
-  release:
-    name: GitHub Release
-    needs: build
-    # Same gate as before: branch pushes only, and never for a -SNAPSHOT version.
-    if: github.event_name == 'push' && !endsWith(needs.build.outputs.version, '-SNAPSHOT')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download jars
-        uses: actions/download-artifact@v4
-        with:
-          name: lmbd-jars
-          path: artifact
-
-      # Both the core library and the shaded Poseidon plugin go on the release.
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.build.outputs.version }}
-          fail_on_unmatched_files: true
-          files: |
-            artifact/core/target/*.jar
-            artifact/poseidon/target/*.jar
-
-  deploy:
-    name: Deploy to Nexus
-    needs: build
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      # server-id must match the <id> in each module's <distributionManagement>,
-      # or `mvn deploy` skips the credentials and fails with a 401.
-      - name: Set up JDK ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: ${{ env.JAVA_VERSION }}
-          cache: maven
-          server-id: johnymuffin-nexus
-          server-username: MAVEN_USERNAME
-          server-password: MAVEN_PASSWORD
-
-      # Publishes com.legacyminecraft.bans:core and :lmbd-poseidon; the aggregator
-      # POM sets maven.deploy.skip, so only the two real artifacts are pushed.
-      - name: Build & Deploy to Nexus
-        run: mvn $MAVEN_CLI_OPTS -DskipTests clean deploy
-        env:
-          MAVEN_USERNAME: ${{ secrets.NEXUS_USERNAME }}
-          MAVEN_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
